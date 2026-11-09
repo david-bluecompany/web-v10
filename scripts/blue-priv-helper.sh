@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# BLUE COMPANY WEB v10.0 — Privileged Operations Helper
+# BLUE COMPANY WEB v10.1 — Privileged Operations Helper
 # Ejecutado vía sudo restringido por el usuario de sistema 'bluepanel'
 # ==============================================================================
 set -euo pipefail
@@ -18,16 +18,24 @@ validar_usuario() {
         echo "ERROR: Usuario reservado del sistema protegido"
         exit 1
     fi
+    # Proteger usuarios con privilegios sudo/admin en el VPS
+    if id -nG "$u" 2>/dev/null | grep -qwE '(sudo|wheel|adm|root|bluecompany)'; then
+        echo "ERROR: No se permite modificar cuentas administrativas del VPS"
+        exit 1
+    fi
 }
 
 es_usuario_administrado() {
     local u="$1"
     validar_usuario "$u"
-    local gecos
-    gecos=$(getent passwd "$u" | cut -d: -f5 || true)
-    if [[ "$gecos" == *"$MANAGED_TAG"* ]]; then
-        return 0
-    fi
+    local passwd_entry uid gecos
+    passwd_entry=$(getent passwd "$u" || true)
+    [ -z "$passwd_entry" ] && return 1
+    uid=$(echo "$passwd_entry" | cut -d: -f3)
+    gecos=$(echo "$passwd_entry" | cut -d: -f5)
+    [ "${uid:-0}" -lt 1000 ] && return 1
+    [[ "$gecos" == *"$MANAGED_TAG"* ]] || return 1
+
     if [ -f "$DB_FILE" ] && command -v sqlite3 &>/dev/null; then
         local existe
         existe=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM ssh_users WHERE username='$u';" 2>/dev/null || echo "0")
@@ -90,7 +98,7 @@ PYEOF
 
 expulsar_usuario() {
     local u="$1"
-    validar_usuario "$u"
+    es_usuario_administrado "$u" || { echo "ERROR: Usuario no administrado por BLUE COMPANY"; exit 1; }
     pkill -KILL -u "$u" 2>/dev/null || true
     ps -eo pid=,user=,args= 2>/dev/null | awk -v usr="$u" '$2=="root" && $0 ~ "sshd(-session)?: " usr "(\\[|@|$)" {print $1}' | xargs -r kill -9 2>/dev/null || true
     local mapa_db
@@ -167,7 +175,6 @@ case "$accion" in
 
     user-kick)
         usuario="${1:-}"
-        es_usuario_administrado "$usuario" || { echo "ERROR: Usuario no administrado por BLUE COMPANY"; exit 1; }
         expulsar_usuario "$usuario"
         echo "OK"
         ;;
@@ -196,12 +203,15 @@ if os.path.exists(cache_file):
     except Exception:
         pass
 
+managed_users = set()
 uid_map = {}
 with open("/etc/passwd", "r", errors="ignore") as pf:
     for line in pf:
         parts = line.strip().split(":")
         if len(parts) >= 5:
             uid_map[parts[2]] = parts[0]
+            if "BLUECOMPANY_MANAGED" in parts[4]:
+                managed_users.add(parts[0])
 
 ss_out = ""
 try:
@@ -235,7 +245,7 @@ for pid in os.listdir("/proc"):
                 m = re.search(r"sshd(?:-session)?:\s+([a-zA-Z0-9_-]+)(?:@|\[notty\]|$)", cmd)
                 if m and m.group(1) != "root":
                     usr = m.group(1)
-        if not usr:
+        if not usr or usr not in managed_users:
             continue
         bytes_rw = 0
         if os.path.exists(f"/proc/{pid}/io"):
@@ -267,7 +277,7 @@ PYEOF
     service-action)
         srv="${1:-}"
         op="${2:-}"
-        [[ "$srv" =~ ^(ssh|dropbear|despachador|badvpn|blue-limiter)$ ]] || { echo "ERROR: Servicio no permitido"; exit 1; }
+        [[ "$srv" =~ ^(ssh|dropbear|despachador|badvpn|blue-limiter)$ ]] || { echo "ERROR: Servicio no permitido (servicios externos como 3X-UI/Xray están protegidos)"; exit 1; }
         [[ "$op" =~ ^(start|stop|restart)$ ]] || { echo "ERROR: Operación inválida"; exit 1; }
         if [ "$srv" = "ssh" ] && [ "$op" = "stop" ]; then
             echo "ERROR: Por seguridad no se permite detener OpenSSH"
@@ -280,17 +290,16 @@ PYEOF
     install-module)
         mod="${1:-}"
         case "$mod" in
-            dropbear) bash "${SCRIPTS_DIR}/install-dropbear.sh" ;;
-            despachador) bash "${SCRIPTS_DIR}/install-despachador.sh" ;;
-            badvpn) bash "${SCRIPTS_DIR}/install-badvpn.sh" ;;
-            limiter) bash "${SCRIPTS_DIR}/install-limiter.sh" ;;
+            dropbear) bash "${SCRIPTS_DIR}/install-dropbear.sh" --non-interactive ;;
+            despachador) bash "${SCRIPTS_DIR}/install-despachador.sh" --non-interactive ;;
+            badvpn) bash "${SCRIPTS_DIR}/install-badvpn.sh" --non-interactive ;;
+            limiter) bash "${SCRIPTS_DIR}/install-limiter.sh" --non-interactive ;;
             bbr)
                 modprobe tcp_bbr 2>/dev/null || true
                 modprobe sch_fq 2>/dev/null || true
                 cat << 'SYSEOF' > /etc/sysctl.d/99-bluecompany-tcp.conf
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-net.ipv4.tcp_low_latency = 1
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_fin_timeout = 15
@@ -312,6 +321,9 @@ SYSEOF
 import json, subprocess, os
 
 issues = []
+def is_enabled_or_present(unit):
+    return os.path.exists(f"/etc/systemd/system/{unit}.service")
+
 def is_active(unit, proc=None):
     if subprocess.call(["systemctl", "is-active", "--quiet", unit]) == 0:
         return True
@@ -319,18 +331,14 @@ def is_active(unit, proc=None):
         return True
     return False
 
-if not is_active("dropbear", "dropbear"):
-    issues.append({"code": "START_DROPBEAR", "msg": "El servicio Dropbear (Puerto 2222) está detenido."})
-if not is_active("despachador", "despachador.py"):
-    issues.append({"code": "START_DESPACHADOR", "msg": "El Despachador Multiplexor WS (Puerto 80) está detenido."})
-if not is_active("badvpn", "badvpn-udpgw"):
-    issues.append({"code": "START_BADVPN", "msg": "El servicio BadVPN UDPGW (Puerto 7300) está detenido."})
-if not is_active("blue-limiter", "blue-limiter.py"):
-    issues.append({"code": "START_LIMITER", "msg": "El demonio Auto-Limitador 24/7 está detenido."})
-
-nat_check = subprocess.call(["iptables", "-t", "nat", "-C", "PREROUTING", "-p", "tcp", "-m", "multiport", "--dports", "8080,8880", "-j", "REDIRECT", "--to-ports", "80"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-if nat_check != 0:
-    issues.append({"code": "FIX_NAT_8080", "msg": "Falta regla NAT iptables (8080, 8880 -> Puerto 80)."})
+if is_enabled_or_present("dropbear") and not is_active("dropbear", "dropbear"):
+    issues.append({"code": "START_DROPBEAR", "msg": "El servicio Dropbear (Puerto 2222) está instalado pero detenido."})
+if is_enabled_or_present("despachador") and not is_active("despachador", "despachador.py"):
+    issues.append({"code": "START_DESPACHADOR", "msg": "El Despachador Multiplexor WS (Puerto 80) está instalado pero detenido."})
+if is_enabled_or_present("badvpn") and not is_active("badvpn", "badvpn-udpgw"):
+    issues.append({"code": "START_BADVPN", "msg": "El servicio BadVPN UDPGW (Puerto 7300) está instalado pero detenido."})
+if is_enabled_or_present("blue-limiter") and not is_active("blue-limiter", "blue-limiter.py"):
+    issues.append({"code": "START_LIMITER", "msg": "El demonio Auto-Limitador 24/7 está instalado pero detenido."})
 
 shells = open("/etc/shells", "r").read().splitlines() if os.path.exists("/etc/shells") else []
 if "/bin/false" not in shells or "/bin/expired" in shells:
@@ -341,12 +349,10 @@ PYEOF
         ;;
 
     repair)
-        pgrep -x "dropbear" &>/dev/null || systemctl start dropbear 2>/dev/null || bash "${SCRIPTS_DIR}/install-dropbear.sh"
-        systemctl is-active --quiet despachador 2>/dev/null || systemctl start despachador 2>/dev/null || bash "${SCRIPTS_DIR}/install-despachador.sh"
-        pgrep -f "badvpn-udpgw" &>/dev/null || systemctl start badvpn 2>/dev/null || bash "${SCRIPTS_DIR}/install-badvpn.sh"
-        systemctl is-active --quiet blue-limiter 2>/dev/null || systemctl start blue-limiter 2>/dev/null || bash "${SCRIPTS_DIR}/install-limiter.sh"
-        iptables -t nat -C PREROUTING -p tcp -m multiport --dports 8080,8880 -j REDIRECT --to-ports 80 2>/dev/null || \
-            iptables -t nat -A PREROUTING -p tcp -m multiport --dports 8080,8880 -j REDIRECT --to-ports 80 2>/dev/null || true
+        [ -f /etc/systemd/system/dropbear.service ] && { pgrep -x "dropbear" &>/dev/null || systemctl start dropbear 2>/dev/null || true; }
+        [ -f /etc/systemd/system/despachador.service ] && { systemctl is-active --quiet despachador 2>/dev/null || systemctl start despachador 2>/dev/null || true; }
+        [ -f /etc/systemd/system/badvpn.service ] && { pgrep -f "badvpn-udpgw" &>/dev/null || systemctl start badvpn 2>/dev/null || true; }
+        [ -f /etc/systemd/system/blue-limiter.service ] && { systemctl is-active --quiet blue-limiter 2>/dev/null || systemctl start blue-limiter 2>/dev/null || true; }
         for sh_path in "/bin/false" "/usr/sbin/nologin"; do
             [ -f "$sh_path" ] && ! grep -qxF "$sh_path" /etc/shells 2>/dev/null && echo "$sh_path" >> /etc/shells
         done
@@ -359,7 +365,7 @@ PYEOF
             proto = $1; split($5, a, ":"); port = a[length(a)]; proc = $7
             gsub(/users:\(\("/, "", proc); gsub(/".*/, "", proc)
             if (proc == "") proc = "kernel/sistema"
-            origen = (port ~ /^(22|80|2222|7300|8443)$/ || proc ~ /despachador|dropbear|badvpn|python3/) ? "BLUE COMPANY" : "EXTERNO (Protegido)"
+            origen = (port ~ /^(2222|7300|8443)$/ || proc ~ /despachador|dropbear|badvpn|blue-limiter/) ? "BLUE COMPANY" : "EXTERNO / SISTEMA (Protegido)"
             printf "%s|%s|%s|%s\n", proto, port, proc, origen
         }' | sort -u
         ;;
