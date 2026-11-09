@@ -1,6 +1,18 @@
 #!/bin/bash
+# ==============================================================================
+# BLUE COMPANY WEB v10.1 — Instalador Configurable Despachador WS (Puerto 80)
+# Rutas multiplexadas: /ws -> 20001 | /upgrade -> 20002 | /xhttp -> 20003 | SSH -> 2222
+# Verifica que 3X-UI, Xray, Nginx o Apache no estén ocupando el puerto 80
+# ==============================================================================
 set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C
+
+PROC_80=$(ss -tlnp 2>/dev/null | awk '$4 ~ /:80$/ {print $6}' || true)
+if [ -n "$PROC_80" ] && ! echo "$PROC_80" | grep -q "despachador\|python3"; then
+    echo "[!] CONFLICTO DE PUERTO 80: Ocupado por un servicio existente (${PROC_80})."
+    echo "[!] Se omite la instalación del Despachador WS para no interrumpir 3X-UI / Nginx / Xray."
+    exit 1
+fi
 
 cat << 'PY_EOF' > /usr/local/bin/despachador.py
 #!/usr/bin/env python3
@@ -170,28 +182,40 @@ if __name__ == "__main__":
     main()
 PY_EOF
 
-chmod 755 /usr/local/bin/despachador.py
+chmod 0755 /usr/local/bin/despachador.py
 
 cat << 'SRV_EOF' > /etc/systemd/system/despachador.service
 [Unit]
-Description=Despachador Multiplexor Puerto 80/8080/8880 (BLUE COMPANY v10.0)
-After=network.target
+Description=Despachador Multiplexor Puerto 80 (WS:20001/Upgrade:20002/XHTTP:20003 - BLUE COMPANY v10.1)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
 Environment="PYTHONUNBUFFERED=1"
-ExecStartPre=-/bin/sh -c 'iptables -t nat -C PREROUTING -p tcp -m multiport --dports 8080,8880 -j REDIRECT --to-ports 80 2>/dev/null || iptables -t nat -A PREROUTING -p tcp -m multiport --dports 8080,8880 -j REDIRECT --to-ports 80 2>/dev/null'
 ExecStart=/usr/bin/python3 /usr/local/bin/despachador.py
-Restart=always
-RestartSec=1
+Restart=on-failure
+RestartSec=2
 LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
 SRV_EOF
 
+# Añadir redirección NAT 8080/8880 -> 80 solo si 8080 y 8880 están libres y no hay reglas conflictivas
+OCC_8080=$(ss -tlnp 2>/dev/null | awk '$4 ~ /:(8080|8880)$/ {print $6}' || true)
+if [ -z "$OCC_8080" ] && command -v iptables &>/dev/null; then
+    iptables -t nat -C PREROUTING -p tcp -m multiport --dports 8080,8880 -j REDIRECT --to-ports 80 2>/dev/null || \
+        iptables -t nat -A PREROUTING -p tcp -m multiport --dports 8080,8880 -j REDIRECT --to-ports 80 2>/dev/null || true
+fi
+
 systemctl daemon-reload
-systemctl enable despachador &>/dev/null
-systemctl restart despachador &>/dev/null || true
-echo "OK: Despachador configurado"
+systemctl enable despachador >/dev/null
+systemctl restart despachador
+
+if ! systemctl is-active --quiet despachador; then
+    echo "ERROR: El servicio despachador no pudo iniciar en el puerto 80."
+    exit 1
+fi
+echo "OK: Despachador WS activo en puerto 80 (Rutas: /ws->20001, /upgrade->20002, /xhttp->20003, SSH->2222)"
