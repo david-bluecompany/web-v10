@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BLUE COMPANY WEB v10.0 • Cloud Network Manager</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <!-- PANTALLA DE LOGIN -->
+  <div id="login-view" class="login-wrapper">
+    <div class="login-card">
+      <div class="brand-badge">BLUE COMPANY v10.0</div>
+      <h1>Cloud Network Manager</h1>
+      <p class="subtitle">Panel Corporativo SSH / WebSocket / UDP</p>
+      <form id="login-form">
+        <label>Usuario Administrador</label>
+        <input type="text" id="login-user" required autocomplete="username" placeholder="admin" />
+        <label>Contraseña</label>
+        <input type="password" id="login-pass" required autocomplete="current-password" placeholder="••••••••" />
+        <div id="login-error" class="error-msg hidden"></div>
+        <button type="submit" class="btn-primary full-width">Iniciar Sesión Segura</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- APLICACIÓN PRINCIPAL (ESTILO 3X-UI) -->
+  <div id="app-view" class="app-layout hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <span class="neon-dot"></span>
+        <div>
+          <h2>BLUE COMPANY</h2>
+          <small id="sidebar-version">WEB v10.0.0</small>
+        </div>
+      </div>
+      <nav class="nav-links">
+        <button class="nav-btn active" data-tab="tab-dashboard">📊 Dashboard General</button>
+        <button class="nav-btn" data-tab="tab-users">👥 Usuarios SSH</button>
+        <button class="nav-btn" data-tab="tab-live">⚡ Monitor en Vivo</button>
+        <button class="nav-btn" data-tab="tab-services">🛠️ Servicios y Puertos</button>
+        <button class="nav-btn" data-tab="tab-diagnostics">🩺 Diagnóstico y Reparación</button>
+        <button class="nav-btn" data-tab="tab-logs">📜 Registros y Auditoría</button>
+        <button class="nav-btn" data-tab="tab-updater">🔄 Actualizaciones y Cuenta</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button id="logout-btn" class="btn-danger full-width">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button id="menu-toggle" class="btn-icon">☰</button>
+        <div class="topbar-info">
+          <span id="sys-os" class="pill">Ubuntu Server</span>
+          <span id="sys-tcp" class="pill pill-success">BBR + LowLatency</span>
+        </div>
+        <div class="admin-chip" id="admin-chip">admin</div>
+      </header>
+
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-panel">
+        <div class="grid-4">
+          <div class="stat-card">
+            <span>CPU Uso</span>
+            <h3 id="stat-cpu">0%</h3>
+            <div class="progress"><div id="bar-cpu" class="progress-bar"></div></div>
+            <small id="stat-cores">Carga: 0.00</small>
+          </div>
+          <div class="stat-card">
+            <span>Memoria RAM</span>
+            <h3 id="stat-ram">0%</h3>
+            <div class="progress"><div id="bar-ram" class="progress-bar"></div></div>
+            <small id="stat-ram-detail">0 GB / 0 GB</small>
+          </div>
+          <div class="stat-card">
+            <span>Disco Raíz (/)</span>
+            <h3 id="stat-disk">0%</h3>
+            <div class="progress"><div id="bar-disk" class="progress-bar"></div></div>
+            <small id="stat-disk-detail">Libre: 0 GB</small>
+          </div>
+          <div class="stat-card">
+            <span>Tráfico Total Red</span>
+            <h3 id="stat-traffic">0 GB</h3>
+            <small id="stat-rxtx">⬇ RX: 0 GB | ⬆ TX: 0 GB</small>
+          </div>
+        </div>
+
+        <div class="grid-4 mt-16">
+          <div class="kpi-box"><span>Total Cuentas SSH</span><strong id="kpi-total">0</strong></div>
+          <div class="kpi-box kpi-green"><span>Clientes Online</span><strong id="kpi-online">0</strong></div>
+          <div class="kpi-box kpi-cyan"><span>Túneles Activos</span><strong id="kpi-tunnels">0</strong></div>
+          <div class="kpi-box kpi-red"><span>Vencidos / Bloq.</span><strong id="kpi-expired">0</strong></div>
+        </div>
+
+        <div class="grid-2 mt-16">
+          <div class="panel-card">
+            <h3>Servicios Administrados (BLUE COMPANY)</h3>
+            <div id="dash-managed-services" class="service-list"></div>
+          </div>
+          <div class="panel-card">
+            <h3>Servicios Externos (Modo Protegido - Solo Lectura)</h3>
+            <div id="dash-external-services" class="service-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: USUARIOS SSH -->
+      <section id="tab-users" class="tab-panel hidden">
+        <div class="panel-header">
+          <div>
+            <h3>Gestión Comercial de Usuarios SSH</h3>
+            <p class="text-muted">Sin almacenamiento de contraseñas en texto plano • Etiquetado GECOS seguro</p>
+          </div>
+          <div class="btn-group">
+            <button id="btn-new-demo" class="btn-secondary">⚡ Demo 1-Click (30m)</button>
+            <button id="btn-new-user" class="btn-primary">+ Nuevo Cliente</button>
+            <button id="btn-purge-expired" class="btn-danger">Purgar Vencidos</button>
+          </div>
+        </div>
+
+        <div class="filter-bar">
+          <input type="text" id="user-search" placeholder="Buscar por usuario o nota..." />
+          <select id="user-filter">
+            <option value="ALL">Todos los estados</option>
+            <option value="ACTIVO">Activos</option>
+            <option value="VENCIDO">Vencidos</option>
+            <option value="SUSPENDIDO">Suspendidos / Bloqueados</option>
+          </select>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Conexiones</th>
+                <th>Vencimiento</th>
+                <th>Estado</th>
+                <th>Notas</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 3: MONITOR EN VIVO -->
+      <section id="tab-live" class="tab-panel hidden">
+        <div class="panel-header">
+          <h3>Monitor en Tiempo Real (Actualización automática 3s)</h3>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>IP Cliente</th>
+                <th>Sesiones / Límite</th>
+                <th>Tiempo Activo</th>
+                <th>Tráfico Sesión</th>
+                <th>Acción Rápida</th>
+              </tr>
+            </thead>
+            <tbody id="live-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 4: SERVICIOS Y PUERTOS -->
+      <section id="tab-services" class="tab-panel hidden">
+        <div class="grid-2">
+          <div class="panel-card">
+            <h3>Control de Servicios y Protocolos</h3>
+            <div id="services-control-list" class="service-list"></div>
+            <hr class="divider" />
+            <h4>Despliegue y Optimización de Módulos</h4>
+            <div class="btn-group wrap mt-8">
+              <button class="btn-secondary" onclick="installModule('bbr')">🚀 Activar TCP BBR + LowLatency</button>
+              <button class="btn-secondary" onclick="installModule('dropbear')">Reinstalar Dropbear (2222)</button>
+              <button class="btn-secondary" onclick="installModule('despachador')">Reinstalar Despachador WS (80)</button>
+              <button class="btn-secondary" onclick="installModule('badvpn')">Reinstalar BadVPN (7300)</button>
+              <button class="btn-secondary" onclick="installModule('limiter')">Reinstalar Auto-Limitador</button>
+            </div>
+          </div>
+          <div class="panel-card">
+            <h3>Puertos en Escucha y Clasificación</h3>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Proto</th><th>Puerto</th><th>Proceso</th><th>Gestión</th></tr>
+                </thead>
+                <tbody id="ports-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: DIAGNÓSTICO Y REPARACIÓN -->
+      <section id="tab-diagnostics" class="tab-panel hidden">
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <h3>Diagnóstico y Reparación Inteligente (Sin Corte de Túneles)</h3>
+              <p class="text-muted">Verifica servicios, reglas NAT 8080/8880 y /etc/shells sin afectar Xray ni Nginx.</p>
+            </div>
+            <div class="btn-group">
+              <button class="btn-secondary" onclick="loadDiagnostics()">🔍 Escanear Ahora</button>
+              <button class="btn-primary" onclick="repairSystem()">🛠️ Reparar Anomalías</button>
+            </div>
+          </div>
+          <div id="diag-results" class="mt-16"></div>
+        </div>
+      </section>
+
+      <!-- TAB 6: REGISTROS Y AUDITORÍA -->
+      <section id="tab-logs" class="tab-panel hidden">
+        <div class="grid-2">
+          <div class="panel-card">
+            <h3>Auditoría Administrativa</h3>
+            <div id="audit-logs-box" class="log-box"></div>
+          </div>
+          <div class="panel-card">
+            <h3>Historial de Bloqueos de Usuarios</h3>
+            <div id="lock-logs-box" class="log-box"></div>
+          </div>
+        </div>
+        <div class="panel-card mt-16">
+          <h3>Eventos de Seguridad SSH / Dropbear (Auth Log Sanitizado)</h3>
+          <pre id="auth-logs-pre" class="code-log"></pre>
+        </div>
+      </section>
+
+      <!-- TAB 7: ACTUALIZADOR Y CUENTA -->
+      <section id="tab-updater" class="tab-panel hidden">
+        <div class="grid-2">
+          <div class="panel-card">
+            <h3>Actualizador Oficial GitHub (SHA256)</h3>
+            <p>Rama oficial: <strong id="up-branch">web-v10</strong></p>
+            <p>Versión instalada: <strong id="up-local">10.0.0</strong></p>
+            <p>Versión disponible en GitHub: <strong id="up-remote">10.0.0</strong></p>
+            <p id="up-changelog" class="text-muted mt-8"></p>
+            <div class="btn-group mt-16">
+              <button class="btn-secondary" onclick="checkUpdates()">Comprobar Actualización</button>
+              <button class="btn-primary" onclick="applyUpdate()">Descargar y Actualizar</button>
+            </div>
+          </div>
+          <div class="panel-card">
+            <h3>Seguridad del Administrador</h3>
+            <form id="admin-pass-form">
+              <label>Contraseña Actual</label>
+              <input type="password" id="adm-curr-pass" required />
+              <label>Nueva Contraseña (mín. 6 caracteres)</label>
+              <input type="password" id="adm-new-pass" required minlength="6" />
+              <button type="submit" class="btn-primary mt-16">Actualizar Contraseña del Panel</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL CREAR / EDITAR USUARIO -->
+  <div id="user-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="modal-title">Nuevo Cliente SSH</h3>
+      <form id="user-form">
+        <input type="hidden" id="form-mode" value="create" />
+        <label>Nombre de Usuario</label>
+        <input type="text" id="form-username" required pattern="[a-zA-Z0-9_-]{1,32}" />
+        <label id="lbl-password">Contraseña SSH</label>
+        <input type="text" id="form-password" placeholder="Ej. 1234" />
+        <label>Duración / Renovación (ej. 30m, 24h, 30d)</label>
+        <input type="text" id="form-duration" value="30d" />
+        <label>Límite de Dispositivos Simultáneos</label>
+        <input type="number" id="form-limit" value="1" min="1" max="100" required />
+        <label>Nota / Referencia</label>
+        <input type="text" id="form-notes" placeholder="Cliente WhatsApp..." />
+        <div class="btn-group mt-16">
+          <button type="button" class="btn-secondary" onclick="closeModal('user-modal')">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL TICKET DE ACCESO -->
+  <div id="ticket-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Ticket de Credenciales • BLUE COMPANY</h3>
+      <pre id="ticket-text" class="code-log"></pre>
+      <div class="btn-group mt-16">
+        <button class="btn-secondary" onclick="closeModal('ticket-modal')">Cerrar</button>
+        <button class="btn-primary" onclick="copyTicket()">📋 Copiar Ticket</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
