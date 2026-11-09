@@ -14,7 +14,7 @@ import psutil
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 VERSION_FILE = "/opt/blue-company/VERSION"
@@ -22,9 +22,9 @@ DB_PATH = "/etc/bluecompany/bluecompany.db"
 SECRET_FILE = "/etc/bluecompany/secret.key"
 PRIV_HELPER = "/usr/local/sbin/blue-priv-helper"
 FRONTEND_DIR = "/opt/blue-company/frontend/dist"
-GITHUB_RAW_BASE = "https://raw.githubusercontent.com/david-bluecompany/blue-company/web-v10"
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com/david-bluecompany/web-v10/main"
 
-app = FastAPI(title="BLUE COMPANY WEB v10.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="BLUE COMPANY WEB v10.1", docs_url=None, redoc_url=None)
 
 def get_secret_key() -> bytes:
     if os.path.exists(SECRET_FILE):
@@ -114,6 +114,14 @@ def init_db():
 def on_startup():
     init_db()
 
+@app.get("/api/health")
+def health_check():
+    ver = open(VERSION_FILE).read().strip() if os.path.exists(VERSION_FILE) else "10.1.0"
+    db_ok = os.path.exists(DB_PATH) and os.access(DB_PATH, os.R_OK | os.W_OK)
+    if not db_ok:
+        raise HTTPException(status_code=503, detail="Database not accessible")
+    return {"status": "ok", "version": ver}
+
 def run_priv(args: list[str], stdin_text: Optional[str] = None) -> str:
     cmd = ["sudo", "-n", PRIV_HELPER] + args
     proc = subprocess.run(
@@ -138,7 +146,7 @@ def log_audit(conn: sqlite3.Connection, admin: str, ip: str, action: str, detail
     conn.commit()
 
 def create_session_token(username: str, csrf_token: str) -> str:
-    exp = int(time.time()) + 43200  # 12h
+    exp = int(time.time()) + 43200
     payload = f"{username}|{exp}|{csrf_token}"
     sig = hmac.new(SECRET_KEY, payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}|{sig}"
@@ -161,7 +169,6 @@ def require_auth(request: Request):
             raise HTTPException(status_code=403, detail="Token CSRF inválido")
     return {"username": username, "csrf_token": csrf_token}
 
-# --- MODELOS DE ENTRADA ---
 class LoginInput(BaseModel):
     username: str = Field(..., min_length=3, max_length=32)
     password: str = Field(..., min_length=4, max_length=128)
@@ -195,7 +202,6 @@ def parse_duration(dur: str) -> int:
         return max(1, val) * 3600
     return max(1, val) * 86400
 
-# --- ENDPOINTS DE AUTENTICACIÓN ---
 @app.post("/api/auth/login")
 def login(data: LoginInput, request: Request, response: Response, conn: sqlite3.Connection = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
@@ -250,7 +256,6 @@ def change_admin_password(data: AdminPasswordInput, request: Request, session: d
     log_audit(conn, session["username"], request.client.host, "CAMBIO_CLAVE_ADMIN", "Contraseña de panel actualizada")
     return {"status": "ok"}
 
-# --- DASHBOARD Y TELEMETRÍA DEL SERVIDOR ---
 @app.get("/api/dashboard")
 def get_dashboard(session: dict = Depends(require_auth), conn: sqlite3.Connection = Depends(get_db)):
     vm = psutil.virtual_memory()
@@ -285,6 +290,7 @@ def get_dashboard(session: dict = Depends(require_auth), conn: sqlite3.Connectio
     external_services = [
         {"id": "xray", "name": "Xray Core", "active": check_srv("xray", "xray")},
         {"id": "x-ui", "name": "Panel 3X-UI", "active": check_srv("x-ui", "x-ui")},
+        {"id": "v2ray", "name": "V2Ray Core", "active": check_srv("v2ray", "v2ray")},
         {"id": "nginx", "name": "Nginx Web Server", "active": check_srv("nginx", "nginx")},
         {"id": "hysteria-server", "name": "Hysteria 2 UDP", "active": check_srv("hysteria-server", "hysteria")},
         {"id": "fail2ban", "name": "Fail2ban IPS", "active": check_srv("fail2ban", "fail2ban")},
@@ -301,7 +307,7 @@ def get_dashboard(session: dict = Depends(require_auth), conn: sqlite3.Connectio
     online_users = sum(1 for v in live_data.values() if v.get("count", 0) > 0)
     active_tunnels = sum(v.get("count", 0) for v in live_data.values())
 
-    ver = "10.0.0"
+    ver = "10.1.0"
     if os.path.exists(VERSION_FILE):
         ver = open(VERSION_FILE).read().strip()
 
@@ -339,7 +345,6 @@ def get_dashboard(session: dict = Depends(require_auth), conn: sqlite3.Connectio
         "external_services": external_services
     }
 
-# --- GESTIÓN DE USUARIOS SSH ---
 @app.get("/api/users")
 def list_users(session: dict = Depends(require_auth), conn: sqlite3.Connection = Depends(get_db)):
     live_raw = run_priv(["live-telemetry"])
@@ -474,7 +479,6 @@ def purge_expired_users(request: Request, session: dict = Depends(require_auth),
     log_audit(conn, session["username"], request.client.host, "PURGAR_VENCIDOS", f"Eliminados={len(deleted)}")
     return {"deleted_count": len(deleted), "users": deleted}
 
-# --- SERVICIOS, DIAGNÓSTICO Y ACTUALIZACIONES ---
 @app.post("/api/services/{service_id}/{operation}")
 def manage_service(service_id: str, operation: str, request: Request, session: dict = Depends(require_auth), conn: sqlite3.Connection = Depends(get_db)):
     run_priv(["service-action", service_id, operation])
@@ -517,9 +521,9 @@ def get_logs(session: dict = Depends(require_auth), conn: sqlite3.Connection = D
 
 @app.get("/api/updater/check")
 async def check_updates(session: dict = Depends(require_auth)):
-    local_ver = open(VERSION_FILE).read().strip() if os.path.exists(VERSION_FILE) else "10.0.0"
+    local_ver = open(VERSION_FILE).read().strip() if os.path.exists(VERSION_FILE) else "10.1.0"
     remote_ver = local_ver
-    changelog = "Edición Web Enterprise v10.0 con arquitectura FastAPI + SQLite y protección de privilegios."
+    changelog = "Edición v10.1.0: Soporte Ubuntu 26.04 ARM64 / Python 3.14, reutilización SSL Let's Encrypt / 3X-UI y aislamiento estricto."
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(f"{GITHUB_RAW_BASE}/VERSION")
@@ -531,7 +535,7 @@ async def check_updates(session: dict = Depends(require_auth)):
         "local_version": local_ver,
         "remote_version": remote_ver,
         "update_available": remote_ver != local_ver,
-        "branch": "web-v10",
+        "branch": "main",
         "changelog": changelog
     }
 
