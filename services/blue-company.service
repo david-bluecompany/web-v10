@@ -1,6 +1,10 @@
 [Unit]
-Description=BLUE COMPANY WEB v10.0 Panel Server (FastAPI + HTTPS)
-After=network.target
+Description=BLUE COMPANY WEB v10.1 Panel Server (FastAPI + HTTPS)
+Documentation=https://github.com/david-bluecompany/web-v10
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -8,10 +12,22 @@ User=bluepanel
 Group=bluecompany
 WorkingDirectory=/opt/blue-company/backend
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/opt/blue-company/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /etc/bluecompany/ssl/key.pem --ssl-certfile /etc/bluecompany/ssl/cert.pem
-Restart=always
-RestartSec=2
-NoNewPrivileges=false
+Environment="PYTHONDONTWRITEBYTECODE=1"
+ExecStartPre=/usr/bin/test -r /etc/bluecompany/ssl/cert.pem
+ExecStartPre=/usr/bin/test -r /etc/bluecompany/ssl/key.pem
+ExecStart=/opt/blue-company/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8443 --ssl-keyfile /etc/bluecompany/ssl/key.pem --ssl-certfile /etc/bluecompany/ssl/cert.pem --timeout-graceful-shutdown 10
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+KillMode=mixed
+
+# Aislamiento compatible con sudo /usr/local/sbin/blue-priv-helper
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=full
+ReadOnlyPaths=/opt/blue-company /etc/bluecompany/ssl
+ReadWritePaths=/etc/bluecompany /var/log/bluecompany /run
 
 [Install]
 WantedBy=multi-user.target
